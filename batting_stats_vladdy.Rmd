@@ -1,0 +1,137 @@
+---
+title: "Vladdy"
+author: "Sam Bird"
+date: "2024-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, include = FALSE, warning = FALSE)
+```
+
+
+```{r Load Packages}
+library(tidyverse)
+library(lubridate)
+library(baseballr)
+library(ragg)
+library(ggrepel)
+```
+
+```{r Functions}
+
+### Statcast Search by doing one day's worth of data at a time ----
+
+statcast_search_limit <- function(start, end, player_type) {
+  
+  start = as.Date(start)
+  end = as.Date(end)
+  dates <- seq.Date(start, end, "days")
+  
+  map_df(dates, ~ statcast_search(
+    start_date = .x,
+    end_date = .x,
+    player_type = player_type
+  ))
+}
+
+```
+
+
+```{r}
+vladdy <- try(fg_batter_game_logs(playerid = 19611, year = 2024)) %>% janitor::clean_names() %>% select(player_name, date, h, ab)
+whitt_jr <- try(fg_batter_game_logs(playerid = 25764, year = 2024)) %>% janitor::clean_names() %>% select(player_name, date, h, ab)
+judge <- try(fg_batter_game_logs(playerid = 15640, year = 2024)) %>% janitor::clean_names() %>% select(player_name, date, h, ab)
+alvarez <- try(fg_batter_game_logs(playerid = 19556, year = 2024)) %>% janitor::clean_names() %>% select(player_name, date, h, ab)
+
+players <- bind_rows(vladdy, whitt_jr, judge) %>% filter(is.na(player_name) == F)
+
+season_dates <- seq.Date(as.Date("2024-03-28"), as.Date("2024-09-25"), by = "days")
+
+
+hits <- tibble(
+  date = season_dates) %>%
+  left_join(
+    players %>%
+      mutate(date= as.Date(date)),
+    by = c("date" = "date")
+  ) %>%
+  complete(date, player_name) %>%
+  filter(is.na(player_name) == F) %>%
+  mutate_if(
+    is.numeric, replace_na, 0) %>%
+  group_by(player_name) %>%
+  mutate(
+    running_hits = cumsum(h),
+    running_ab = cumsum(ab),
+    running_avg = if_else(running_ab < 60, NA, running_hits/running_ab),
+    vladdy_ind = if_else(player_name == "Vladimir Guerrero Jr.", "Vladdy", "Others"),
+    # player_label= case_when(
+    #   date == max(date) ~ player_name,
+    #   TRUE ~ NA)
+    player_label = case_when(
+      player_name == "Bobby Witt Jr." & date == "2024-09-15" ~ player_name,
+      player_name == "Aaron Judge" & date == "2024-08-19" ~ player_name,
+      # player_name == "Yordan Alvarez" & date == "2024-08-31" ~ player_name,
+      player_name == "Vladimir Guerrero Jr." & date == max(date) ~ player_name,
+      T ~ NA
+    )
+  )
+
+
+
+```
+
+
+```{r, include=TRUE}
+
+
+
+hits %>% 
+  filter(vladdy_ind != "Vladdy") %>%
+  ggplot(aes(x = date, y = running_avg))+
+  
+  geom_line(aes(group = player_name), linewidth = 0.8, color = "grey80") + 
+  
+  geom_line(
+    data = hits %>% filter(vladdy_ind == "Vladdy"),
+    color = "#134A8E",
+    linewidth = 0.9) +
+  
+  scale_y_continuous(limits = c(0.3, 0.36), labels= scales::label_number(accuracy = 0.001), breaks = seq(0.3, 0.36, by = 0.005)) + 
+  scale_x_date(
+    breaks = seq.Date(as.Date("2024-08-01"), as.Date("2024-10-03"), by = "weeks"),
+    labels=scales::label_date(format = "%b %d"),
+    limits = c(as_date("2024-08-01"), as_date("2024-10-05"))) +
+  geom_label(aes(label = player_label), size = 5, family = "Montserrat", vjust =-1, color = "grey70") +
+  geom_text(
+    data = hits %>% filter(vladdy_ind == "Vladdy"),
+    aes(label = player_label),
+    size = 5,
+    family = "Montserrat",
+    fontface= "bold",
+    colour = "#134A8E",
+    vjust = -0.2, hjust = 0.1) + 
+  labs(
+    title= "Vladdy's Race to the American League Batting Title",
+    subtitle = "2024 Batting Average Since August 1st"
+    )+
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text.y = element_text(family = "Montserrat", size = 14, hjust = 0),
+    axis.text.x = element_text(family = "Montserrat", size = 13),
+    plot.title.position = "plot",
+    plot.title = element_text(size = 18, family = "Roboto",  face = "bold"),
+    plot.subtitle = element_text(size = 16, family = "Roboto", face="italic"),
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linewidth = 0.5, color = "grey95"),
+    plot.background = element_rect(fill = "white",colour = NA),
+    axis.tick.y = element_line(linewidth = 0.5, colour = "grey95")
+  )
+
+ggsave("vladdy_avg_2024.png",device = agg_png, width =12, height = 6,units = "in")
+
+```
+
